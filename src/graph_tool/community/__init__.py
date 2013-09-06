@@ -4,6 +4,7 @@
 # graph_tool -- a general graph manipulation python module
 #
 # Copyright (C) 2006-2013 Tiago de Paula Peixoto <tiago@skewed.de>
+# Copyright (C) 2013 Giuseppe Profiti <profgiuseppe@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -60,6 +61,7 @@ Summary
 
    community_structure
    modularity
+   louvain
 
 
 Contents
@@ -82,7 +84,7 @@ __all__ = ["minimize_blockmodel_dl", "BlockState", "mcmc_sweep",
            "collect_edge_marginals", "collect_vertex_marginals",
            "bethe_entropy", "mf_entropy", "model_entropy", "get_max_B",
            "get_akc", "min_dist", "condensation_graph",  "community_structure",
-           "modularity"]
+           "modularity","louvain"]
 
 from . blockmodel import minimize_blockmodel_dl, BlockState, mcmc_sweep, \
     model_entropy, get_max_B, get_akc, min_dist, condensation_graph, \
@@ -334,3 +336,90 @@ def modularity(g, prop, weight=None):
                                            _prop("e", ug, weight),
                                            _prop("v", ug, prop))
     return m
+
+####### EXPERIMENTAL
+def louvain(g, weight=None, partition=None, verbose=False):
+    r"""
+    Calculate a community partition using the Louvain method based
+    on modularity maximization.
+
+    Parameters
+    ----------
+    g : :class:`~graph_tool.Graph`
+        Graph to be used. Only undirected graphs are supported.
+    weight : :class:`~graph_tool.PropertyMap` (optional, default: None)
+        Edge property map with the optional edge weights.
+    partition : :class:`~graph_tool.PropertyMap` (optional, default: None)
+        Initial partitioning to start with.
+    verbose : boolean (optional, default: False)
+        Enables the verbose evaluation of the algorithm.
+
+    Returns
+    -------
+    prop : :class:`~graph_tool.PropertyMap`
+        Vertex property map with the community partition.
+
+    See Also
+    --------
+    community_structure: obtain the community structure
+    modularity: calculate the network modularity
+    condensation_graph: Network of communities, or blocks
+
+    Notes
+    -----
+
+    Given a graph and optional edge weights specified by `weight`, the Louvain
+    method of modularity maximization [blondel-fast-2008]_ proceeds as
+    follow:
+
+    .. math::
+
+          Q = \sum_s e_{ss}-\left(\sum_r e_{rs}\right)^2
+
+    where :math:`e_{rs}` is the fraction of edges which fall between
+    vertices with spin s and r.
+
+    If enabled during compilation, this algorithm runs in parallel.
+
+    Examples
+    --------
+    >>> from pylab import *
+    >>> from numpy.random import seed
+    >>> seed(42)
+    >>> g = gt.load_graph("community.xml")
+    >>> spins = gt.community_structure(g, 10000, 10)
+    >>> gt.modularity(g, spins)
+    0.535314188562404
+
+    References
+    ----------
+    .. [blondel-fast-2008] V. D. Blondel, et al. "Fast unfolding of communities
+       in large networks", Journal of Statistical Mechanics: Theory and
+       Experiment 2008.10 (2008): P10008,
+       :doi:`10.1088/1742-5468/2008/10/P10008` :arxiv:`physics/0803.0476`
+    """
+    if type(g) is not 'graph_tool.Graph':
+        raise TypeError('Method must be used on graph_tool undirected graphs')
+    
+    if g.is_directed():
+        raise TypeError('Method must be used on graph_tool undirected graphs')
+
+    #if the graph has no edges...
+    if g.num_edges()==0:
+        #... if there is already a partition, return the same
+        if partition:
+            return partition
+        else:
+            #... otherwise, each vertex goes into its own community
+            comm = g.vertex_index.copy('int')
+            return comm
+
+    if partition:
+        #in case a partition was provided, use the condensation graph
+        work_graph, new_partition = condensation_graph(g, partition, eweight=weight)
+    else:
+        #otherwise, each vertex goes into its own community
+        work_graph = g.copy()
+        new_partition = g.vertex_index.copy('int')
+
+    return new_partition

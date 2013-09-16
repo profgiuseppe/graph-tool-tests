@@ -338,7 +338,7 @@ def modularity(g, prop, weight=None):
     return m
 
 ####### EXPERIMENTAL
-def louvain(g, weight=None, partition=None, verbose=False):
+def louvain(g, weight=None, partition=None, threshold=0.00001, verbose=False):
     r"""
     Calculate a community partition using the Louvain method based
     on modularity maximization.
@@ -351,6 +351,8 @@ def louvain(g, weight=None, partition=None, verbose=False):
         Edge property map with the optional edge weights.
     partition : :class:`~graph_tool.PropertyMap` (optional, default: None)
         Initial partitioning to start with.
+    threshold : float (optional, default: 0.00001)
+        The threshold used to stop the algorithm.
     verbose : boolean (optional, default: False)
         Enables the verbose evaluation of the algorithm.
 
@@ -372,25 +374,18 @@ def louvain(g, weight=None, partition=None, verbose=False):
     method of modularity maximization [blondel-fast-2008]_ proceeds as
     follow:
 
-    .. math::
+        * each node is assigned to a different community
+        * it is evaluated the gain in modularity by moving each node in its
+        neighbouring communities
+        * the assignment that leads to the best increase is performed
+        * repeat from step 2 on the condensation graph
 
-          Q = \sum_s e_{ss}-\left(\sum_r e_{rs}\right)^2
-
-    where :math:`e_{rs}` is the fraction of edges which fall between
-    vertices with spin s and r.
-
-    If enabled during compilation, this algorithm runs in parallel.
-
-    Examples
-    --------
-    >>> from pylab import *
-    >>> from numpy.random import seed
-    >>> seed(42)
-    >>> g = gt.load_graph("community.xml")
-    >>> spins = gt.community_structure(g, 10000, 10)
-    >>> gt.modularity(g, spins)
-    0.535314188562404
-
+    The algorithm ends when the increase in modularity is below a specified threshold.
+    
+    .. note ::
+        The quality of the partition returned by the algorithm depends on the
+        order in which the nodes are considered.
+        
     References
     ----------
     .. [blondel-fast-2008] V. D. Blondel, et al. "Fast unfolding of communities
@@ -398,7 +393,7 @@ def louvain(g, weight=None, partition=None, verbose=False):
        Experiment 2008.10 (2008): P10008,
        :doi:`10.1088/1742-5468/2008/10/P10008` :arxiv:`physics/0803.0476`
     """
-    if type(g) is not 'graph_tool.Graph':
+    if type(g) is not Graph:
         raise TypeError('Method must be used on graph_tool undirected graphs')
     
     if g.is_directed():
@@ -406,20 +401,175 @@ def louvain(g, weight=None, partition=None, verbose=False):
 
     #if the graph has no edges...
     if g.num_edges()==0:
+        if verbose:
+            print("The graph has no edges...")
         #... if there is already a partition, return the same
         if partition:
+            if verbose:
+                print("Returning input partition")
             return partition
         else:
             #... otherwise, each vertex goes into its own community
             comm = g.vertex_index.copy('int')
+            if verbose:
+                print("Returning single nodes partition")
             return comm
 
     if partition:
         #in case a partition was provided, use the condensation graph
-        work_graph, new_partition = condensation_graph(g, partition, eweight=weight)
+        if verbose:
+            print("Evaluating condensation graph")
+        work_graph, old_partition, part_sizes, weight = condensation_graph(g, partition, eweight=weight)
     else:
         #otherwise, each vertex goes into its own community
+        if verbose:
+            print("Copying graph")
         work_graph = g.copy()
-        new_partition = g.vertex_index.copy('int')
+        old_partition = g.vertex_index.copy('int')
+
+    dendo = [old_partition]
+        #perform the evaluation
+    if verbose:
+        print("Evaluating 1 step")
+    new_partition = louvain_step(work_graph,old_partition,threshold,weight,verbose)
+    thepart = g.copy_property(new_partition)
+    dendo.append(thepart)
+
+    return dendo
+
+
+def louvain_step(g,partition,threshold,weight=None,verbose=False):
+    #(weighted) degree of the nodes
+    if verbose:
+        print("Evaluating degrees")
+    kw = g.degree_property_map('total',weight)
+    #result
+    new_partition = g.copy_property(partition)
+    
+    #temporary, it leads to numerical errors **WARNING**
+    if verbose:
+        print("Evaluating 2m")
+    m = sum(kw.a)
+    
+    #a fictional change just to enter the loop
+    changed = True
+    #until the increase is below the threshold
+    while changed:
+        if verbose:
+            print("The partition has changed...")
+        changed = False
+        #for each node
+        for v in g.vertices():
+            if verbose:
+                print("Evaluating node",v)
+            increase = (0.0,)
+            #set of neighbouring communities
+            newcomms = set([])
+            #the current community
+            current_comm = new_partition[v]
+            if verbose:
+                print("Current community is ",current_comm)
+            #the new community, the same for the moment
+            newcom = new_partition[v]
+            #for all the neighbours
+            for n in v.all_neighbours():
+                #check if the community is different from
+                #the current one, and if it wasn't already
+                #evaluated
+                if new_partition[n]!=current_comm and\
+                    new_partition[n] not in newcomms:
+                    #evaluate the increase in modularity
+                    deltaq = deltas(g,v,new_partition,
+                                    new_partition[n],
+                                    weight,kw,m)
+                    if verbose:
+                        print("Moving to community ",new_partition[n]," gives ",deltaq[0])
+                    #if the increase is better than the previous one
+                    if deltaq[0] > increase[0]:
+                        if verbose:
+                            print("Which is higer than ",increase[0])
+                        increase = deltaq
+                        newcom = new_partition[n]
+            #if the increase is above the threshold
+            if (increase[0]>threshold):
+                if verbose:
+                    print(increase[0]," > ",threshold,": changing community to ",newcom)
+                new_partition[v]=newcom
+                changed = True
 
     return new_partition
+            
+def deltas(g,x,partition,new_community,w=None,kw=None,m=None):
+    r"""
+    Calculate the increase in modularity if a node is moved
+    from its current community to a new one.
+
+    Parameters
+    ----------
+    g : :class:`~g_tool.Graph`
+        Graph to be used. Only undirected graphs are supported.
+    x : :class:`~g_tool.Vertex`
+        The vertex that would be moved.
+    partition : :class:`~g_tool.PropertyMap` (optional, default: None)
+        The current partitioning of the graph.
+    new_community: int
+        The community where the node should be moved to.
+    w : :class:`~g_tool.PropertyMap` (optional, default: None)
+        Edge property map with the optional edge weights.
+    kw : :class:`~g_tool.PropertyMap` (optional, default: None)
+        Vertex property map with the (weighted) degree of each node.
+    m : float (optional, default: False)
+        Double of the total weight of the graph, i.e.:
+
+    .. math::
+
+          m = \sum_{ij} A_{ij}
+
+    where i and j are vertex of the graph and A is the adjacency matrix
+    of the graph.
+
+    Returns
+    -------
+    deltaq : float
+        The increase in modularity.
+    kw : :class:`~g_tool.PropertyMap`
+        Vertex property map with the (weighted) degree of each node.
+    m : float
+        Double of the total weight of the graph.
+
+    Notes
+    -------
+    """
+    
+    #evaluates the weighted degree, if needed
+    if not kw:
+        kw = g.degree_property_map('total',w)
+        
+    delta = 0.0
+    current_partition = partition[x]
+    #the increase in modularity depends on the weight of the edges
+    #from vertex x to the current and the new communities.
+    for v in x.all_neighbours():
+        #we don't want to consider self loops
+        if v!=x:
+            e = g.edge(x,v)
+            if e:
+                if partition[v]==new_community:
+                    delta += w[e]
+                elif partition[v]==current_partition:
+                    delta -= w[e]
+
+    if not m:
+        m = 0.0
+    s = 0.0
+    for v in g.vertices():
+        if v!=x:
+            if partition[v]==new_community:
+                s += kw[v]
+            elif partition[v]==current_partition:
+                s -= kw[v]
+        if not m:
+            m += kw[v]
+
+    deltaq = 2*(delta - (kw[x]/m)*s)/m
+    return deltaq,kw,m

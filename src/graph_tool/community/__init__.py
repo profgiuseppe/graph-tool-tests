@@ -338,6 +338,7 @@ def modularity(g, prop, weight=None):
     return m
 
 ####### EXPERIMENTAL
+@profile
 def louvain(g, weight=None, partition=None, threshold=0.00001, verbose=False):
     r"""
     Calculate a community partition using the Louvain method based
@@ -419,7 +420,7 @@ def louvain(g, weight=None, partition=None, threshold=0.00001, verbose=False):
         #in case a partition was provided, use the condensation graph
         if verbose:
             print("Evaluating condensation graph")
-        work_graph, old_partition, part_sizes, weight = condensation_graph(g, partition, eweight=weight)
+        work_graph, old_partition, part_sizes, weight, va, ea = condensation_graph(g, partition, eweight=weight)
     else:
         #otherwise, each vertex goes into its own community
         if verbose:
@@ -428,7 +429,7 @@ def louvain(g, weight=None, partition=None, threshold=0.00001, verbose=False):
         old_partition = g.vertex_index.copy('int')
 
     dendo = [old_partition]
-        #perform the evaluation
+    #perform the evaluation
     if verbose:
         print("Evaluating 1 step")
     new_partition = louvain_step(work_graph,old_partition,threshold,weight,verbose)
@@ -437,7 +438,7 @@ def louvain(g, weight=None, partition=None, threshold=0.00001, verbose=False):
 
     return dendo
 
-
+@profile
 def louvain_step(g,partition,threshold,weight=None,verbose=False):
     #(weighted) degree of the nodes
     if verbose:
@@ -498,7 +499,8 @@ def louvain_step(g,partition,threshold,weight=None,verbose=False):
                 changed = True
 
     return new_partition
-            
+
+@profile            
 def deltas(g,x,partition,new_community,w=None,kw=None,m=None):
     r"""
     Calculate the increase in modularity if a node is moved
@@ -549,15 +551,14 @@ def deltas(g,x,partition,new_community,w=None,kw=None,m=None):
     current_partition = partition[x]
     #the increase in modularity depends on the weight of the edges
     #from vertex x to the current and the new communities.
-    for v in x.all_neighbours():
+    for e in x.all_edges():
         #we don't want to consider self loops
+        v = e.target()
         if v!=x:
-            e = g.edge(x,v)
-            if e:
-                if partition[v]==new_community:
-                    delta += w[e]
-                elif partition[v]==current_partition:
-                    delta -= w[e]
+            if partition[v]==new_community:
+                delta += w[e]
+            elif partition[v]==current_partition:
+                delta -= w[e]
 
     if not m:
         m = 0.0

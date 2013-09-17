@@ -453,6 +453,8 @@ def louvain_step(g,partition,threshold,weight=None,verbose=False):
     if verbose:
         print("Evaluating 2m")
     m = sum(kw.a)
+
+    neigh = dict((v,v.all_neighbours()) for v in g.vertices())
     
     #a fictional change just to enter the loop
     changed = True
@@ -468,37 +470,39 @@ def louvain_step(g,partition,threshold,weight=None,verbose=False):
                 for vv in g.vertices():
                     print(vv,new_partition[vv])
             increase = (0.0,)
-            #set of neighbouring communities
-            newcomms = set([])
             #the current community
             current_comm = new_partition[v]
             if verbose:
                 print("Current community is ",current_comm)
             s2 = sum([kw[vv] for vv in c2v[current_comm]-set([v])])
-            d = sum([weight[e] for e in v.all_edges() if e.target() in c2v[current_comm]-set([v])])
+            d = sum([weight[e] for e in v.all_edges() if e.target() in c2v[current_comm]])
+            ee = g.edge(v,v)
+            if ee:
+                d -= weight[ee]
             if verbose:
                 print("s2=",s2,"\nd=",d)
             #the new community, the same for the moment
             newcom = new_partition[v]
             #for all the neighbours
-            for n in v.all_neighbours():
-                #check if the community is different from
-                #the current one, and if it wasn't already
-                #evaluated
-                if new_partition[n]!=current_comm and\
-                    new_partition[n] not in newcomms:
-                    #evaluate the increase in modularity
-                    deltaq = deltas(g,v,new_partition,c2v,
-                                    new_partition[n],s2,d,
-                                    weight,kw,m)
+            if v in neigh[v]:
+                neigh.remove(v)
+            #set of neighbouring communities
+            neighcomms = set([new_partition[vv] for vv in neigh[v]])
+            if current_comm in neighcomms:
+                neighcomms.remove(current_comm)
+            for n in neighcomms:
+                #evaluate the increase in modularity
+                deltaq = deltas(g,v,new_partition,c2v,
+                                n,s2,d,
+                                weight,kw,m)
+                if verbose:
+                    print("Moving to community ",n," gives ",deltaq[0])
+                #if the increase is better than the previous one
+                if deltaq[0] > increase[0]:
                     if verbose:
-                        print("Moving to community ",new_partition[n]," gives ",deltaq[0])
-                    #if the increase is better than the previous one
-                    if deltaq[0] > increase[0]:
-                        if verbose:
-                            print("Which is higer than ",increase[0])
-                        increase = deltaq
-                        newcom = new_partition[n]
+                        print("Which is higer than ",increase[0])
+                    increase = deltaq
+                    newcom = n
             #if the increase is above the threshold
             if (increase[0]>threshold):
                 if verbose:

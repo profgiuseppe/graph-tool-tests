@@ -338,7 +338,7 @@ def modularity(g, prop, weight=None):
     return m
 
 ####### EXPERIMENTAL
-@profile
+#@profile
 def louvain(g, weight=None, partition=None, threshold=0.00001, verbose=False):
     r"""
     Calculate a community partition using the Louvain method based
@@ -438,7 +438,7 @@ def louvain(g, weight=None, partition=None, threshold=0.00001, verbose=False):
 
     return dendo
 
-@profile
+#@profile
 def louvain_step(g,partition,threshold,weight=None,verbose=False):
     #(weighted) degree of the nodes
     if verbose:
@@ -514,7 +514,7 @@ def louvain_step(g,partition,threshold,weight=None,verbose=False):
 
     return new_partition
 
-@profile            
+#@profile            
 def deltas(g,x,partition,c2v,new_community,s2,d,w=None,kw=None,m=None):
     r"""
     Calculate the increase in modularity if a node is moved

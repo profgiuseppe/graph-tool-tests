@@ -446,7 +446,9 @@ def louvain_step(g,partition,threshold,weight=None,verbose=False):
     kw = g.degree_property_map('total',weight)
     #result
     new_partition = g.copy_property(partition)
-    
+    #trading memory for speed
+    c2v = reverse_dict(new_partition,g.vertices())
+        
     #temporary, it leads to numerical errors **WARNING**
     if verbose:
         print("Evaluating 2m")
@@ -472,8 +474,8 @@ def louvain_step(g,partition,threshold,weight=None,verbose=False):
             current_comm = new_partition[v]
             if verbose:
                 print("Current community is ",current_comm)
-            s2 = sum([kw[vv] for vv in g.vertices() if new_partition[vv]==current_comm])
-            d = sum([weight[e] for e in v.all_edges() if e.target()!=v and new_partition[e.target()]==current_comm])
+            s2 = sum([kw[vv] for vv in c2v[current_comm]-set([v])])
+            d = sum([weight[e] for e in v.all_edges() if e.target() in c2v[current_comm]-set([v])])
             if verbose:
                 print("s2=",s2,"\nd=",d)
             #the new community, the same for the moment
@@ -486,7 +488,7 @@ def louvain_step(g,partition,threshold,weight=None,verbose=False):
                 if new_partition[n]!=current_comm and\
                     new_partition[n] not in newcomms:
                     #evaluate the increase in modularity
-                    deltaq = deltas(g,v,new_partition,
+                    deltaq = deltas(g,v,new_partition,c2v,
                                     new_partition[n],s2,d,
                                     weight,kw,m)
                     if verbose:
@@ -501,13 +503,15 @@ def louvain_step(g,partition,threshold,weight=None,verbose=False):
             if (increase[0]>threshold):
                 if verbose:
                     print(increase[0]," > ",threshold,": changing community to ",newcom)
+                c2v[current_comm].remove(v)
                 new_partition[v]=newcom
+                c2v[newcom].add(v)
                 changed = True
 
     return new_partition
 
 @profile            
-def deltas(g,x,partition,new_community,s2,d,w=None,kw=None,m=None):
+def deltas(g,x,partition,c2v,new_community,s2,d,w=None,kw=None,m=None):
     r"""
     Calculate the increase in modularity if a node is moved
     from its current community to a new one.
@@ -556,10 +560,10 @@ def deltas(g,x,partition,new_community,s2,d,w=None,kw=None,m=None):
     #the increase in modularity depends on the weight of the edges
     #from vertex x to the current and the new communities.
     #we don't want to consider self loops
-    delta = sum([w[e] for e in x.all_edges() if e.target()!=x and partition[e.target()]==new_community])
+    delta = sum([w[e] for e in x.all_edges() if e.target() in c2v[new_community]])
     delta = delta-d
     #print("Delta=",delta)
-    s1 = sum([kw[v] for v in g.vertices() if partition[v]==new_community])
+    s1 = sum([kw[v] for v in c2v[new_community]])
     s = s1-s2+kw[x]
     #print("s=",s)
     if not m:    
@@ -567,3 +571,17 @@ def deltas(g,x,partition,new_community,s2,d,w=None,kw=None,m=None):
         
     deltaq = 2*(delta - (kw[x]/m)*s)/m
     return deltaq,kw,m
+
+def reverse_dict(d,keys=None):
+    if not keys:
+        keys = d.keys()
+
+    c2v = dict()
+    
+    for v in keys:
+        if d[v] in c2v:
+            c2v[d[v]].add(v)
+        else:
+            c2v[d[v]]=set([v])
+
+    return c2v

@@ -463,6 +463,8 @@ def louvain_step(g,partition,threshold,weight=None,verbose=False):
         for v in g.vertices():
             if verbose:
                 print("Evaluating node",v)
+                for vv in g.vertices():
+                    print(vv,new_partition[vv])
             increase = (0.0,)
             #set of neighbouring communities
             newcomms = set([])
@@ -470,6 +472,10 @@ def louvain_step(g,partition,threshold,weight=None,verbose=False):
             current_comm = new_partition[v]
             if verbose:
                 print("Current community is ",current_comm)
+            s2 = sum([kw[vv] for vv in g.vertices() if new_partition[vv]==current_comm])
+            d = sum([weight[e] for e in v.all_edges() if e.target()!=v and new_partition[e.target()]==current_comm])
+            if verbose:
+                print("s2=",s2,"\nd=",d)
             #the new community, the same for the moment
             newcom = new_partition[v]
             #for all the neighbours
@@ -481,7 +487,7 @@ def louvain_step(g,partition,threshold,weight=None,verbose=False):
                     new_partition[n] not in newcomms:
                     #evaluate the increase in modularity
                     deltaq = deltas(g,v,new_partition,
-                                    new_partition[n],
+                                    new_partition[n],s2,d,
                                     weight,kw,m)
                     if verbose:
                         print("Moving to community ",new_partition[n]," gives ",deltaq[0])
@@ -501,7 +507,7 @@ def louvain_step(g,partition,threshold,weight=None,verbose=False):
     return new_partition
 
 @profile            
-def deltas(g,x,partition,new_community,w=None,kw=None,m=None):
+def deltas(g,x,partition,new_community,s2,d,w=None,kw=None,m=None):
     r"""
     Calculate the increase in modularity if a node is moved
     from its current community to a new one.
@@ -547,21 +553,17 @@ def deltas(g,x,partition,new_community,w=None,kw=None,m=None):
     if not kw:
         kw = g.degree_property_map('total',w)
         
-    delta = 0.0
-    current_partition = partition[x]
     #the increase in modularity depends on the weight of the edges
     #from vertex x to the current and the new communities.
     #we don't want to consider self loops
-    edges = [e for e in x.all_edges() if e.target()!=x]
-    delta = sum([w[e] for e in edges if partition[e.target()]==new_community])
-    delta = delta-sum([w[e] for e in edges if partition[e.target()]==current_partition])
-
-    if not m:
-        m = 0.0
+    delta = sum([w[e] for e in x.all_edges() if e.target()!=x and partition[e.target()]==new_community])
+    delta = delta-d
+    #print("Delta=",delta)
     s1 = sum([kw[v] for v in g.vertices() if partition[v]==new_community])
-    s2 = sum([kw[v] for v in g.vertices() if partition[v]==current_partition])
     s = s1-s2+kw[x]
-    if not m:
-        m = s1+s2+kw[x]
+    #print("s=",s)
+    if not m:    
+        m = sum([kw[v] for v in g.vertices()])
+        
     deltaq = 2*(delta - (kw[x]/m)*s)/m
     return deltaq,kw,m

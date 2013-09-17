@@ -551,26 +551,17 @@ def deltas(g,x,partition,new_community,w=None,kw=None,m=None):
     current_partition = partition[x]
     #the increase in modularity depends on the weight of the edges
     #from vertex x to the current and the new communities.
-    for e in x.all_edges():
-        #we don't want to consider self loops
-        v = e.target()
-        if v!=x:
-            if partition[v]==new_community:
-                delta += w[e]
-            elif partition[v]==current_partition:
-                delta -= w[e]
+    #we don't want to consider self loops
+    edges = [e for e in x.all_edges() if e.target()!=x]
+    delta = sum([w[e] for e in edges if partition[e.target()]==new_community])
+    delta = delta-sum([w[e] for e in edges if partition[e.target()]==current_partition])
 
     if not m:
         m = 0.0
-    s = 0.0
-    for v in g.vertices():
-        if v!=x:
-            if partition[v]==new_community:
-                s += kw[v]
-            elif partition[v]==current_partition:
-                s -= kw[v]
-        if not m:
-            m += kw[v]
-
+    s1 = sum([kw[v] for v in g.vertices() if partition[v]==new_community])
+    s2 = sum([kw[v] for v in g.vertices() if partition[v]==current_partition])
+    s = s1-s2+kw[x]
+    if not m:
+        m = s1+s2+kw[x]
     deltaq = 2*(delta - (kw[x]/m)*s)/m
     return deltaq,kw,m

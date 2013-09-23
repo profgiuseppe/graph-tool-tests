@@ -337,8 +337,7 @@ def modularity(g, prop, weight=None):
                                            _prop("v", ug, prop))
     return m
 
-####### EXPERIMENTAL
-#@profile
+####EXPERIMENTAL
 def louvain(g, weight=None, partition=None, threshold=0.00001, verbose=False):
     r"""
     Calculate a community partition using the Louvain method based
@@ -432,30 +431,39 @@ def louvain(g, weight=None, partition=None, threshold=0.00001, verbose=False):
     #perform the evaluation
     if verbose:
         print("Evaluating 1 step")
-    new_partition = louvain_step(work_graph,old_partition,threshold,weight,verbose)
+
+    kw = work_graph.degree_property_map('total',weight)
+    #this is the same no matter the level in the dendogram
+    m = sum(kw.a)
+    
+    new_partition = louvain_step(work_graph,old_partition,threshold,weight,m,kw,verbose)
     thepart = g.copy_property(new_partition)
     dendo.append(thepart)
 
     return dendo
 
-#@profile
-def louvain_step(g,partition,threshold,weight=None,verbose=False):
+def louvain_step(g,partition,threshold,weight=None,m=None,kw=None,verbose=False):
     #(weighted) degree of the nodes
     if verbose:
         print("Evaluating degrees")
-    kw = g.degree_property_map('total',weight)
+    if not kw:
+        kw = g.degree_property_map('total',weight)
     #result
     new_partition = g.copy_property(partition)
     #trading memory for speed
     c2v = reverse_dict(new_partition,g.vertices())
-        
     #temporary, it leads to numerical errors **WARNING**
+    if not m:
+        m = sum(kw.a)
     if verbose:
-        print("Evaluating 2m")
-    m = sum(kw.a)
+        print("2m=",m)        
 
-    neigh = dict((v,v.all_neighbours()) for v in g.vertices())
-    
+    neigh = dict((v,set(v.all_neighbours())) for v in g.vertices())
+    for v in g.vertices():
+        #for all the neighbours
+        if v in neigh[v]:
+            neigh[v].remove(v)
+
     #a fictional change just to enter the loop
     changed = True
     #until the increase is below the threshold
@@ -467,29 +475,28 @@ def louvain_step(g,partition,threshold,weight=None,verbose=False):
         for v in g.vertices():
             if verbose:
                 print("Evaluating node",v)
-                for vv in g.vertices():
-                    print(vv,new_partition[vv])
             increase = (0.0,)
             #the current community
             current_comm = new_partition[v]
             if verbose:
                 print("Current community is ",current_comm)
-            s2 = sum([kw[vv] for vv in c2v[current_comm]-set([v])])
+            s2 = sum([kw[vv] for vv in c2v[current_comm]])-kw[v]
+                     
             d = sum([weight[e] for e in v.all_edges() if e.target() in c2v[current_comm]])
             ee = g.edge(v,v)
             if ee:
                 d -= weight[ee]
-            if verbose:
-                print("s2=",s2,"\nd=",d)
+#            if verbose:
+#                print("s2=",s2,"\nd=",d)
             #the new community, the same for the moment
             newcom = new_partition[v]
-            #for all the neighbours
-            if v in neigh[v]:
-                neigh.remove(v)
+            
             #set of neighbouring communities
             neighcomms = set([new_partition[vv] for vv in neigh[v]])
             if current_comm in neighcomms:
                 neighcomms.remove(current_comm)
+            if verbose:
+                print("Neighbouring communities:",neighcomms)
             for n in neighcomms:
                 #evaluate the increase in modularity
                 deltaq = deltas(g,v,new_partition,c2v,
@@ -514,7 +521,6 @@ def louvain_step(g,partition,threshold,weight=None,verbose=False):
 
     return new_partition
 
-#@profile            
 def deltas(g,x,partition,c2v,new_community,s2,d,w=None,kw=None,m=None):
     r"""
     Calculate the increase in modularity if a node is moved
@@ -564,7 +570,10 @@ def deltas(g,x,partition,c2v,new_community,s2,d,w=None,kw=None,m=None):
     #the increase in modularity depends on the weight of the edges
     #from vertex x to the current and the new communities.
     #we don't want to consider self loops
-    delta = sum([w[e] for e in x.all_edges() if e.target() in c2v[new_community]])
+    if w:
+        delta = sum([w[e] for e in x.all_edges() if e.target() in c2v[new_community][0]])
+    else:
+        delta = sum([1 for e in x.all_edges() if e.target() in c2v[new_community]])
     delta = delta-d
     #print("Delta=",delta)
     s1 = sum([kw[v] for v in c2v[new_community]])
